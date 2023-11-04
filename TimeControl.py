@@ -1,5 +1,7 @@
 import bpy
+import blf
 from threading import Timer
+from math import floor
 
 bl_info = {
     "name": "Time Control",
@@ -12,17 +14,54 @@ bl_info = {
 }
 
 timerFunction = None
+timerDrawHandler = None
+area3D = None
+
+
+def secondsToHMS(seconds:float) -> str:
+    secondsString:str = str(floor(seconds%60))
+    minuitesString:str = str(floor((seconds/60)%60))
+    hoursString:str = str(floor(seconds/3600))
+    return hoursString + " h " + minuitesString + " m " + secondsString + " s"
+
+def getFirst3DArea(context:bpy.types.Context) ->bpy.types.Area:
+    if context == None:
+        return None
+    
+    for area in context.screen.areas:
+        if area.type == 'VIEW_3D':
+            return area
+    return None
 
 def InfiniteTimer():
     bpy.context.preferences.addons[__name__].preferences.totalOpenTime += 1.0
     bpy.context.scene.timecontrol_timer += 1.0
-    print("TICK TOTAL" + str(bpy.context.preferences.addons[__name__].preferences.totalOpenTime))
-    print("TICK SCENE" + str(bpy.context.scene.timecontrol_timer))
+    # print("TICK TOTAL" + str(bpy.context.preferences.addons[__name__].preferences.totalOpenTime))
+    # print("TICK SCENE" + str(bpy.context.scene.timecontrol_timer))
+
+    global area3D
+    if area3D == None:
+        area3D = getFirst3DArea(bpy.context)
+    else:
+        area3D.tag_redraw()
+
     return 1.0
 
+def drawTimeNumber(context:bpy.types.Context):
+    font_id: int = 0
+    textTotalTime = secondsToHMS(context.preferences.addons[__name__].preferences.totalOpenTime)
+    textSceneTime= secondsToHMS(context.scene.timecontrol_timer)
+    blf.color(font_id, 1.0, 1.0, 1.0, 1.0)
+
+    position = (5.0,10.0)
+    size = 10
+    blf.size = size
+    blf.position(font_id, position[0],position[1], 0.0)
+    blf.draw(font_id, textTotalTime)
+    blf.position(font_id, position[0],position[1] + size+5, 0.0)
+    blf.draw(font_id, textSceneTime)
 
 def StartTimerWrapper():
-    print("START WRAPPER")
     bpy.ops.timecontrol.start_timer()
 
 class TIMECONTORL_start_timer(bpy.types.Operator):
@@ -31,6 +70,11 @@ class TIMECONTORL_start_timer(bpy.types.Operator):
 
 
     def execute(self, context):
+        global timerDrawHandler
+        if timerDrawHandler == None:
+            args = (bpy.context,)
+            timerDrawHandler = bpy.types.SpaceView3D.draw_handler_add(drawTimeNumber, args, 'WINDOW', 'POST_PIXEL')
+
         global timerFunction
         if bpy.app.timers.is_registered(timerFunction): # return if already registered
             return {'FINISHED'}
@@ -43,7 +87,6 @@ class TIMECONTORL_start_timer(bpy.types.Operator):
         bpy.app.timers.register(timerFunction)
         return {'FINISHED'}
 
-
 class TIMECONTORL_stop_timer(bpy.types.Operator):
     bl_idname = "timecontrol.stop_timer"
     bl_label = "Stop Time Control Timer"
@@ -54,20 +97,10 @@ class TIMECONTORL_stop_timer(bpy.types.Operator):
             bpy.app.timers.unregister(timerFunction)
         return {'FINISHED'}
 
-# def draw_popover(self,context):
-#     row : bpy.types.UILayout  = self.layout.row()
-#     row = row.row(align=True)
-#     row.operator('lightcontrol.adjust_light', text='Edit', icon='OUTLINER_OB_LIGHT',)
-
 class TIMECONTROL_Addon_Preferences(bpy.types.AddonPreferences):
     # this must match the add-on name, use '__package__'
     # when defining this in a submodule of a python package.
     bl_idname = __name__
-
-    # def showEditLightButtonUpdate(self,context):
-    #     bpy.types.VIEW3D_MT_editor_menus.remove(draw_popover)
-    #     if self.showEditLightButtonPanel:
-    #         bpy.types.VIEW3D_MT_editor_menus.append(draw_popover)
             
     totalOpenTime: bpy.props.FloatProperty(
         name="File Open Time",
@@ -88,10 +121,8 @@ class TIMECONTROL_Addon_Preferences(bpy.types.AddonPreferences):
 classes = [TIMECONTORL_start_timer, TIMECONTORL_stop_timer, TIMECONTROL_Addon_Preferences]
 
 def register():
-    print("registered")
     for cls in classes:
         bpy.utils.register_class(cls)
-
     Timer(1, StartTimerWrapper, ()).start()
 
 def unregister():
@@ -101,6 +132,7 @@ def unregister():
 
     for cls in classes:
         bpy.utils.unregister_class(cls)
-    print("unregistered")
-
-    #bpy.types.VIEW3D_MT_editor_menus.remove(draw_popover)
+    
+    global timerDrawHandler
+    if timerDrawHandler != None:
+        bpy.types.SpaceView3D.draw_handler_remove(timerDrawHandler, 'WINDOW')
