@@ -10,18 +10,19 @@ bl_info = {
     "name": "Time Control",
     "description": "A Tool That Tracks the Time you have a Blender File Open",
     "author": "Blendercontrol - Blendercontrol@gmail.com",
-    "version": (0, 8, 0),
+    "version": (0, 9, 0),
     "blender": (3, 6, 0),
     "location": "Will automatically be triggered when Blender Starts",
     "category": "Time"
 }
 
+timer:float = 0.0
 timerFunction = None
 timerDrawHandler = None
-area3D = None
+area3D : bpy.types.Area = None
 
 
-def initializeTimeDataFile(context: bpy.types.Context):
+def initializeTimeDataFile():
     filepath = str(os.path.dirname(__file__)) + "\\timeData.json"
 
     if not os.path.exists(filepath):
@@ -41,19 +42,20 @@ def initializeTimeDataFile(context: bpy.types.Context):
         #If there is no current Scene time, create current Scene time
         currentFileName = str(bpy.path.basename(bpy.context.blend_data.filepath))
         if currentFileName in data:
-            context.scene["timecontrol_timer"] = data[currentFileName]
+            global timer
+            timer = data[currentFileName]
 
     with open(filepath, "w") as jsonFile:
         json.dump(data,jsonFile)
 
-def updateTimeDataFile(context: bpy.types.Context):
-    filepath = str(os.path.dirname(__file__)) + "\\timeData.json"
+def updateTimeDataFile(newTime:float):
+    filepath = str(os.path.dirname(__file__)) + "\\timeData.json" # TODO: filepath should be in  C:\...\AppData\Roaming\Blender Foundation\Blender, and not in the version (i think)
 
     if os.path.exists(filepath):
         with open(filepath, "r") as jsonFile:
             data = json.load(jsonFile)
 
-        data[str(bpy.path.basename(bpy.context.blend_data.filepath))] = context.scene["timecontrol_timer"]
+        data[str(bpy.path.basename(bpy.context.blend_data.filepath))] = newTime
 
         with open(filepath, "w") as jsonFile:
             json.dump(data,jsonFile)
@@ -87,11 +89,11 @@ def getFirst3DArea(context:bpy.types.Context) ->bpy.types.Area:
     return None
 
 def InfiniteTimer():
-    if "timecontrol_timer" in bpy.context.scene.keys():
-        bpy.context.scene["timecontrol_timer"] += 1.0
+    global timer
+    timer += 1.0
 
     if bpy.data.is_saved:
-        updateTimeDataFile(bpy.context)
+        updateTimeDataFile(timer)
 
     global area3D
     if area3D == None:
@@ -111,10 +113,10 @@ def drawTimeNumber():
     textTotalTime = secondsToHMS(sumTimeDataFile())
     blf.position(font_id, position[0],position[1], 0.0)
     blf.draw(font_id, textTotalTime)
-    if "timecontrol_timer" in bpy.context.scene.keys():
-        textSceneTime = secondsToHMS(bpy.context.scene["timecontrol_timer"]) # TODO: Scene has no Attribute ?!
-        blf.position(font_id, position[0], position[1] + size + 5, 0.0)
-        blf.draw(font_id, textSceneTime)
+    global timer
+    textSceneTime = secondsToHMS(timer)
+    blf.position(font_id, position[0], position[1] + size + 5, 0.0)
+    blf.draw(font_id, textSceneTime)
 
 def StartTimerWrapper():
     bpy.ops.timecontrol.start_timer()
@@ -130,11 +132,7 @@ class TIMECONTORL_start_timer(bpy.types.Operator):
             args = ()
             timerDrawHandler = bpy.types.SpaceView3D.draw_handler_add(drawTimeNumber, args, 'WINDOW', 'POST_PIXEL')
 
-        if "timecontrol_timer" not in context.scene.keys():
-            bpy.types.Scene.timecontrol_timer = bpy.props.FloatProperty(name="timecontrol_timer", description="Mouse Position when Pie Menu was Initialized",default=0.0)
-            context.scene["timecontrol_timer"] = 0.0
-
-        initializeTimeDataFile(context)
+        initializeTimeDataFile()
 
         global timerFunction
         if bpy.app.timers.is_registered(timerFunction): # return if already registered
@@ -154,7 +152,6 @@ class TIMECONTORL_stop_timer(bpy.types.Operator):
             bpy.app.timers.unregister(timerFunction)
         return {'FINISHED'}
 
-# TODO: Reload when Opening a new file.
 class TIMECONTROL_Addon_Preferences(bpy.types.AddonPreferences):
     # this must match the add-on name, use '__package__'
     # when defining this in a submodule of a python package.
@@ -171,16 +168,33 @@ class TIMECONTROL_Addon_Preferences(bpy.types.AddonPreferences):
         layout: bpy.types.UILayout = self.layout
         layout.label(text="Directory to Time Data Save File")
         layout.prop(self, "timeData")
+        layout.separator_spacer()
+        layout.label(text = "Total Blend File times are " + secondsToHMS(sumTimeDataFile()))
+        layout.label(text = "Current Blend File time is " + secondsToHMS(timer))
+        layout.separator_spacer()
+        filepath = str(os.path.dirname(__file__)) + "\\timeData.json"
+        if os.path.exists(filepath):
+            with open(filepath, "r") as jsonFile:
+                data = json.load(jsonFile)
+                data = dict(sorted(data.items(), key=lambda item: item[1], reverse=True))
+            for filename in data:
+                filetext:str = str(filename) + " is opened " + secondsToHMS(data[filename])
+                layout.label(text=filetext)
 
 
 #################################################################
 ####################### REGISTRATION ############################
 #################################################################
 classes = [TIMECONTORL_start_timer, TIMECONTORL_stop_timer, TIMECONTROL_Addon_Preferences]
-# TODO: When using Save as, reset Timer - Dont use Scene Property, make global variable and only store by Filename.
+# TODO: When using Save as, reset Timer
 
 @persistent
-def unregisterHandlers(dummy):
+def registerHandlers():
+    print("register Handler:", bpy.data.filepath)
+    Timer(1, StartTimerWrapper, ()).start()
+
+@persistent
+def unregisterHandlers():
     print("unregister Handler:", bpy.data.filepath)
     global timerFunction
     if bpy.app.timers.is_registered(timerFunction):
@@ -193,14 +207,11 @@ def unregisterHandlers(dummy):
        timerDrawHandler = None
     global area3D
     area3D = None
-
-@persistent
-def registerHandlers(dummy):
-    print("register Handler:", bpy.data.filepath)
-    Timer(1, StartTimerWrapper, ()).start()
+    global timer
+    timer = 0.0
 
 def register():
-    bpy.app.handlers.load_pre.append(unregisterHandlers)
+    bpy.app.handlers.load_pre.append(unregisterHandlers) # TODO: check if handlers are already subscribed
     bpy.app.handlers.load_post.append(registerHandlers)
     for cls in classes:
         bpy.utils.register_class(cls)
