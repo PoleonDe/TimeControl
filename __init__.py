@@ -16,7 +16,7 @@ bl_info = {
     "category": "Time"
 }
 
-timer:float = 0.0
+timer = 0.0
 timerFunction = None
 timerDrawHandler = None
 area3D : bpy.types.Area = None
@@ -37,28 +37,29 @@ def initializeTimeDataFile():
             # create empty data
             data = {}
 
-    #If current Scene is saved
-    if bpy.data.is_saved:
-        #If there is no current Scene time, create current Scene time
-        currentFileName = str(bpy.path.basename(bpy.context.blend_data.filepath))
-        if currentFileName in data:
-            global timer
-            timer = data[currentFileName]
-
     with open(filepath, "w") as jsonFile:
         json.dump(data,jsonFile)
 
-def updateTimeDataFile(newTime:float):
+def updateTimeDataFile(addedTime:float):
     filepath = str(os.path.dirname(__file__)) + "\\timeData.json" # TODO: filepath should be in  C:\...\AppData\Roaming\Blender Foundation\Blender, and not in the version (i think)
 
     if os.path.exists(filepath):
         with open(filepath, "r") as jsonFile:
             data = json.load(jsonFile)
 
-        data[str(bpy.path.basename(bpy.context.blend_data.filepath))] = newTime
+        if bpy.data.is_saved:
+            jsonFilePath = str(bpy.path.basename(bpy.context.blend_data.filepath))
+        else:
+            jsonFilePath = "Unsaved Files"
+
+        currentTime = float(data[jsonFilePath] if jsonFilePath in data else 0.0)
+        data[jsonFilePath] = currentTime + addedTime
+        global timer
+        timer = currentTime + addedTime
 
         with open(filepath, "w") as jsonFile:
             json.dump(data,jsonFile)
+    return
 
 def sumTimeDataFile() -> float:
     filepath = str(os.path.dirname(__file__)) + "\\timeData.json"
@@ -89,11 +90,7 @@ def getFirst3DArea(context:bpy.types.Context) ->bpy.types.Area:
     return None
 
 def InfiniteTimer():
-    global timer
-    timer += 1.0
-
-    if bpy.data.is_saved:
-        updateTimeDataFile(timer)
+    updateTimeDataFile(1.0)      
 
     global area3D
     if area3D == None:
@@ -189,12 +186,12 @@ classes = [TIMECONTORL_start_timer, TIMECONTORL_stop_timer, TIMECONTROL_Addon_Pr
 # TODO: When using Save as, reset Timer
 
 @persistent
-def registerHandlers():
+def registerHandlers(file :str):
     print("register Handler:", bpy.data.filepath)
     Timer(1, StartTimerWrapper, ()).start()
 
 @persistent
-def unregisterHandlers():
+def unregisterHandlers(file :str):
     print("unregister Handler:", bpy.data.filepath)
     global timerFunction
     if bpy.app.timers.is_registered(timerFunction):
@@ -222,4 +219,4 @@ def register():
 def unregister():
     for cls in classes:
         bpy.utils.unregister_class(cls)
-    unregisterHandlers()
+    unregisterHandlers("")
